@@ -65,16 +65,21 @@
               // 設定 Firebase 收到相關事件與對應動作
               this.initFirebaseListener();
               this.tryToGetUserMedia()
-              .then((stream) => {
-                this.peerConn.addStream(stream);
+              .then((gumStream) => {
+                // console.log('gumStream', gumStream);
+                for (const track of gumStream.getTracks()) {
+                  this.peerConn.addTrack(track);
+                }
               })
             } else {
               console.log('[我不是Caller] 先設定本地端的串流再處理 initFirebaseListener');
               // 取得用戶的視訊音頻串流
               this.tryToGetUserMedia()
-              .then((stream) => {
+              .then((gumStream) => {
                 return new Promise((resolve) => {
-                  this.peerConn.addStream(stream);
+                  for (const track of gumStream.getTracks()) {
+                    this.peerConn.addTrack(track);
+                  }
                   resolve(1);
                 })
               })
@@ -169,8 +174,14 @@
 
         // 當取得串流時, 指定回 this.otherStream
         this.peerConn.ontrack = (evt) => {
-          console.log('onaddstream called', evt);
-          this.otherStream = evt.streams[0];
+          console.log('ontrack called', evt);
+          if (evt.streams && evt.streams[0]) {
+            this.otherStream = evt.streams[0];
+          } else {
+            const inboundStream = new MediaStream();
+            this.otherStream = inboundStream;
+            inboundStream.addTrack(evt.track);
+          }
 
           // 同時清除 firebase 上的資訊
           this.realtimeDB.remove();
@@ -250,7 +261,7 @@
                   .catch((e) => console.error('setRemoteDescription error', e));
                 return;
               }
-          
+
               // 接收對方的 candidate 並加入自己的 RTCPeerConnection
               if (candidate) {
                 // console.log('收到 candicate:', roomMap);
