@@ -18,8 +18,7 @@
     audio: false,
 		video: true
   };
-  
-  const signalingChannel = {};
+
   const PEER_CONNECTION_CONFIG = {
     iceServers: ICE_SERVERS,
   };
@@ -49,6 +48,8 @@
 
       this.roomId = roomIdResult[1];
 
+      // 初始化 realtime database
+      this.initRealtimeDB();
       // 建立 PeerConnection 相關事件與對應動作
       this.initPeerConnection();
     },
@@ -57,11 +58,33 @@
         this.isUserNameSet = !this.isUserNameSet;
         console.log('userName', this.userName);
         this.$nextTick(() => {
-          // 設定 Firebase 收到相關事件與對應動作
-          this.initFirebaseListener();
-
-          // 取得用戶的視訊音頻串流
-          this.tryToGetUserMedia();
+          this.judgeAndSetCaller()
+          .then((isCaller) => {
+            if (isCaller === true) {
+              console.log('[我是Caller] 先處理 initFirebaseListener 再設定本地端的串流');
+              // 設定 Firebase 收到相關事件與對應動作
+              this.initFirebaseListener();
+              this.tryToGetUserMedia()
+              .then((stream) => {
+                this.peerConn.addStream(stream);
+              })
+            } else {
+              console.log('[我不是Caller] 先設定本地端的串流再處理 initFirebaseListener');
+              // 取得用戶的視訊音頻串流
+              this.tryToGetUserMedia()
+              .then((stream) => {
+                return new Promise((resolve) => {
+                  this.peerConn.addStream(stream);
+                  resolve(1);
+                })
+              })
+              .then(() => {
+                // 設定 Firebase 收到相關事件與對應動作
+                this.initFirebaseListener();
+              });
+            }
+          });
+          
         })
       },
 
@@ -90,14 +113,21 @@
         };
 
         // 在 https 上只會取得一次權限
-        navigator
+        return navigator
           .mediaDevices
             .getUserMedia(CONSTRAINTS)
             .then(success)
-            .then((stream) => {
-              this.peerConn.addStream(stream);
-            })
             .catch(error);
+      },
+
+      sendSdpToFirebase() {
+        // 透過 firebase 將 sdp 送出
+        console.log('透過 透過 firebase 將 sdp 送出, sdp:', this.peerConn.localDescription);
+        const sendData = {
+          userName: this.userName,
+          sdp: this.peerConn.localDescription
+        };
+        this.realtimeDB.push(JSON.stringify(sendData));
       },
 
       /**
@@ -111,7 +141,7 @@
         // 當有任何 ICE candidates 可用時，
         // 透過 Firebase 將 candidate 傳送給對方
         this.peerConn.onicecandidate = (evt) => {
-          console.log('onicecandidate called', evt);
+          // console.log('onicecandidate called', evt);
           if (evt.candidate) {
             const sendData = {
               userName: this.userName,
@@ -123,7 +153,7 @@
 
         this.peerConn.onnegotiationneeded = () => {
           if (this.isCaller !== true) {
-            console.log('我不是 caller, 自己會產 answer');
+            console.log('我不是 caller, 自己會產 answer, 現階段跳過');
             return;
           }
           console.log('onnegotiationneeded called, 我是caller, 我要產 offer!');
@@ -133,22 +163,14 @@
                   console.log('執行 this.peerConn.setLocalDescription');
                   return this.peerConn.setLocalDescription(offer);
                 })
-                .then(() => {
-                  // 透過 firebase 將 sdp 送出
-                  console.log('透過 透過 firebase 將 sdp 送出, sdp:', this.peerConn.localDescription);
-                  const sendData = {
-                    userName: this.userName,
-                    sdp: this.peerConn.localDescription
-                  };
-                  this.realtimeDB.push(JSON.stringify(sendData));
-                })
+                .then(this.sendSdpToFirebase)
                 .catch((e) => console.error('[錯誤] onnegotiationneeded error:', e));
         }
 
         // 當取得串流時, 指定回 this.otherStream
-        this.peerConn.onaddstream = (evt) => {
-          console.log('onaddstream called');
-          this.otherStream = evt.stream;
+        this.peerConn.ontrack = (evt) => {
+          console.log('onaddstream called', evt);
+          this.otherStream = evt.streams[0];
 
           // 同時清除 firebase 上的資訊
           this.realtimeDB.remove();
@@ -156,40 +178,61 @@
       },
 
       /**
+       * 初始化 realtime database
+       */
+      initRealtimeDB() {
+        this.realtimeDB = firebase.database().ref(`rooms/${this.roomId}`);
+      },
+
+      /**
+       * 判斷並且設定用戶是不是為 caller
+       */
+      judgeAndSetCaller() {
+        // 設定誰是 caller
+        return new Promise((resolve) => {
+          this.realtimeDB.once('value', (snapshot) => {
+            const roomMap = snapshot.val();
+            if (!roomMap) {
+              console.log('我是caller');
+              this.setCaller(true);
+              resolve(true);
+              return;
+            }
+            console.log('我不是caller');
+            this.setCaller(false);
+            resolve(false);
+          });
+        })
+      },
+
+      /**
        * 設定 Firebase 收到相關事件與對應動作
        */
       initFirebaseListener() {
         console.log('initFirebaseListener');
-        this.realtimeDB = firebase.database().ref(`rooms/${this.roomId}`);
-
         this.realtimeDB
-          .once('value', (snapshot) => {
-            const roomMap = snapshot.val();
-            console.log('Firebase有資料過來囉!', roomMap);
-            // TODO: 處理 sdp 交換事宜
+            .on('child_added', (snapshot) => {
+              const roomMap = snapshot.val();
+              if (!roomMap) {
+                return;
+              }
+              // TODO: 處理 sdp 交換事宜
+              // console.log('Firebase 資料', roomMap);
             
-            if (!roomMap) {
-              console.log('沒有任何資料, 成為 caller!');
-              this.setCaller(true);
-              return;
-            }
-            this.setCaller(false);
-          
-            // 會執行到這, 就代表 isCaller = false, 只能產生 answer
-            for (let key in roomMap) {
+              // 會執行到這, 就代表 isCaller = false, 只能產生 answer
               const {
                 userName,
                 sdp,
                 candidate,
-              } = JSON.parse(roomMap[key]);
+              } = JSON.parse(roomMap);
           
               if (this.userName === userName) {
-                console.log('是自己的資料, 所以 pass');
-                continue;
+                // console.log('是自己的資料, 所以 pass');
+                return;
               }
-          
+
               if (sdp) {
-                console.log('收到 sdp:', roomMap[key]);
+                console.log('收到 sdp');
                 // 將收到不是自己的 sdp 設定為自己的 remote
                 this.peerConn.setRemoteDescription(new RTCSessionDescription(sdp))
                   .then(() => {
@@ -200,15 +243,7 @@
                         console.log('[answer] 執行 this.peerConn.setLocalDescription');
                         return this.peerConn.setLocalDescription(answer);
                       })
-                      .then(() => {
-                        // 透過 firebase 將 sdp 送出
-                        console.log('透過 透過 firebase 將 sdp 送出, sdp:', this.peerConn.localDescription);
-                        const sendData = {
-                          userName: this.userName,
-                          sdp: this.peerConn.localDescription
-                        };
-                        this.realtimeDB.push(JSON.stringify(sendData));
-                      })
+                      .then(this.sendSdpToFirebase)
                       .catch((e) => console.error('[錯誤] createAnswer error:', e));
                     }
                   })
@@ -218,12 +253,11 @@
           
               // 接收對方的 candidate 並加入自己的 RTCPeerConnection
               if (candidate) {
-                console.log('收到 candicate:', roomMap[key]);
+                // console.log('收到 candicate:', roomMap);
                 this.peerConn.addIceCandidate(new RTCIceCandidate(candidate));
                 return;
               }
-            }
-          });
+            });
       },
 
     }
