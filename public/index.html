@@ -29,6 +29,20 @@
 			width: 100%;
 			background-color: #ddd;
 		}
+		.col-4 {
+			width: 33.33333%;
+		}
+		.width-100 {
+			width: 100%;
+			white-space: nowrap;
+			font-size: 0;
+		}
+		.custom-btn {
+			text-align: center;
+			display: inline-block;
+			padding: 10px;
+			font-size: 14px;
+		}
 	</style>
 </head>
 
@@ -65,16 +79,27 @@
 		
 		
 		<div class="video-area">
-			<video id="other" :src-object.prop.camel="otherStream" autoplay playsinline></video>
+			<video id="other" ref="otherVideo" :src-object.prop.camel="otherStream" autoplay playsinline></video>
 			<div class="self-area">
 				<video id="self" :src-object.prop.camel="selfStream" autoplay playsinline></video>
 			</div>
+		</div>
+
+		<div class="width-100">
+			<div class="col-4 custom-btn btn-danger" @click="clearFirebase">清除Firebase</div>
+			<div class="col-4 custom-btn btn-warning" @click="screenshot">截圖存檔</div>
+			<div class="col-4 custom-btn btn-info">特效</div>
+		</div>
+
+		<div>
+			<canvas ref="canvas"></canvas>
 		</div>
 	</div>
 
 	<script src="https://www.gstatic.com/firebasejs/7.7.0/firebase-app.js"></script>
 	<script src="https://www.gstatic.com/firebasejs/7.7.0/firebase-database.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/vue@2.6.11"></script>
+	<script src="https://cdn.jsdelivr.net/npm/sweetalert2@9"></script>
 	<script src="./js/index.js"></script>
 </body>
 

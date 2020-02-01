@@ -37,13 +37,15 @@
       isSetCaller: false,
     },
     mounted() {
+      const randRoomId = Math.ceil(1000 * Math.random());
       if (!window.location.hash) {
-        return alert('請在網址列使用 #roomId=xxx 當作房間ID');
+        window.location.hash = `#roomId=${randRoomId}`;
       }
 
-      const roomIdResult = window.location.hash.match(/\#roomId=(\d+)/);
+      let roomIdResult = window.location.hash.match(/\#roomId=(\d+)/);
       if (!roomIdResult) {
-        return alert('請傳入房間ID');
+        window.location.hash = `#roomId=${randRoomId}`;
+        roomIdResult = [, randRoomId];
       }
 
       this.roomId = roomIdResult[1];
@@ -178,14 +180,38 @@
           if (evt.streams && evt.streams[0]) {
             this.otherStream = evt.streams[0];
           } else {
+            console.log('收到遠端串流');
             const inboundStream = new MediaStream();
             this.otherStream = inboundStream;
             inboundStream.addTrack(evt.track);
+            inboundStream.onremovetrack = (evt) => {
+              console.log("Removed: " + evt.track.kind + ": " + evt.track.label);
+            };
           }
 
           // 同時清除 firebase 上的資訊
           this.realtimeDB.remove();
         };
+
+        const intervalId = setInterval(() => {
+          console.log(`現在連接狀態為 ${this.peerConn.connectionState}`);
+          if (this.peerConn.connectionState === 'disconnected') {
+            clearInterval(intervalId);
+            Swal.fire({
+              title: '錯誤',
+              text: '對方已斷線',
+              icon: 'warning',
+            });
+          }
+          if (this.peerConn.connectionState === 'failed') {
+            clearInterval(intervalId);
+            Swal.fire({
+              title: '失敗',
+              text: '連接失敗 (有一方連接不上ice)',
+              icon: 'warning',
+            });
+          }
+        }, 3000);
       },
 
       /**
@@ -271,6 +297,30 @@
             });
       },
 
+      clearFirebase() {
+        if (!this.realtimeDB) {
+          return;
+        }
+        this.realtimeDB.remove();
+        Swal.fire({
+          title: '成功',
+          text: '已成功清除',
+          icon: 'success',
+        });
+      },
+
+      screenshot() {
+        const canvas = this.$refs['canvas'];
+        canvas.width = window.innerWidth;
+        canvas.height = this.$refs['otherVideo'].clientHeight;
+        canvas.getContext('2d').drawImage(
+          this.$refs['otherVideo'],
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
+      }
     }
   });
 
