@@ -65,10 +65,13 @@
             if (isCaller === true) {
               console.log('[我是Caller] 先處理 initFirebaseListener 再設定本地端的串流');
               // 設定 Firebase 收到相關事件與對應動作
-              this.initFirebaseListener();
-              this.tryToGetUserMedia()
+              this.initFirebaseListener()
+              .then(() => {
+                return this.tryToGetUserMedia();
+              })
               .then((gumStream) => {
-                // console.log('gumStream', gumStream);
+                console.log('gumStream', gumStream);
+                console.log('[1] gumStream.getTracks():', gumStream.getTracks());
                 for (const track of gumStream.getTracks()) {
                   this.peerConn.addTrack(track);
                 }
@@ -79,6 +82,7 @@
               this.tryToGetUserMedia()
               .then((gumStream) => {
                 return new Promise((resolve) => {
+                  console.log('[2] gumStream.getTracks():', gumStream.getTracks());
                   for (const track of gumStream.getTracks()) {
                     this.peerConn.addTrack(track);
                   }
@@ -160,7 +164,7 @@
 
         this.peerConn.onnegotiationneeded = () => {
           if (this.isCaller !== true) {
-            console.log('我不是 caller, 自己會產 answer, 現階段跳過');
+            console.log('[onnegotiationneeded] 我不是 caller, 自己會產 answer, 現階段跳過');
             return;
           }
           console.log('onnegotiationneeded called, 我是caller, 我要產 offer!');
@@ -190,11 +194,49 @@
           }
 
           // 同時清除 firebase 上的資訊
-          this.realtimeDB.remove();
+          // this.realtimeDB.remove();
         };
 
+        this.peerConn.oniceconnectionstatechange = (evt) => {
+          console.log('[ice] 連線狀態改變:', this.peerConn.iceConnectionState);
+
+          if (this.peerConn.iceConnectionState === 'failed') {
+            console.log('ice failed:', evt);
+            Swal.fire({
+              title: 'ICE連接失敗',
+              text: 'ICE連接失敗',
+              icon: 'warning',
+            });
+          }
+        };
+
+        this.peerConn.onicegatheringstatechange = () => {
+          console.log('peerConnection.iceGatheringState:', this.peerConn.iceGatheringState);
+        }
+
+        this.peerConn.onsignalingstatechange = (e) => {
+          console.log('========================================');
+          console.log('pc.signalingState', this.peerConn.signalingState);
+          console.log('========================================');
+        }
+
+        this.peerConn.onconnectionstatechange = (e) => {
+          switch (this.peerConn.connectionState) {
+            case 'connected':
+              console.log('[onconnectionstatechange] 已連接 ===> 清除 realtime db');
+              this.realtimeDB.remove();
+              break;
+            case "disconnected":
+            case "failed":
+              console.error('[onconnectionstatechange] 連線失敗!!');
+              break;
+            case "closed":
+              console.log('[onconnectionstatechange] 斷線');
+              break;
+          }
+        }
+
         const intervalId = setInterval(() => {
-          console.log(`現在連接狀態為 ${this.peerConn.connectionState}`);
           if (this.peerConn.connectionState === 'disconnected') {
             clearInterval(intervalId);
             Swal.fire({
@@ -211,7 +253,7 @@
               icon: 'warning',
             });
           }
-        }, 3000);
+        }, 1000);
       },
 
       /**
@@ -247,54 +289,59 @@
        */
       initFirebaseListener() {
         console.log('initFirebaseListener');
-        this.realtimeDB
-            .on('child_added', (snapshot) => {
-              const roomMap = snapshot.val();
-              if (!roomMap) {
-                return;
-              }
-              // TODO: 處理 sdp 交換事宜
-              // console.log('Firebase 資料', roomMap);
+        return new Promise((resolve) => {
+          this.realtimeDB
+              .on('child_added', (snapshot) => {
+                const roomMap = snapshot.val();
+                if (!roomMap) {
+                  return;
+                }
+                // TODO: 處理 sdp 交換事宜
+                // console.log('Firebase 資料', roomMap);
+              
+                // 會執行到這, 就代表 isCaller = false, 只能產生 answer
+                const {
+                  userName,
+                  sdp,
+                  candidate,
+                } = JSON.parse(roomMap);
             
-              // 會執行到這, 就代表 isCaller = false, 只能產生 answer
-              const {
-                userName,
-                sdp,
-                candidate,
-              } = JSON.parse(roomMap);
-          
-              if (this.userName === userName) {
-                // console.log('是自己的資料, 所以 pass');
-                return;
-              }
-
-              if (sdp) {
-                console.log('收到 sdp');
-                // 將收到不是自己的 sdp 設定為自己的 remote
-                this.peerConn.setRemoteDescription(new RTCSessionDescription(sdp))
-                  .then(() => {
-                    console.log('此時 this.peerConn.remoteDescription.type = ', this.peerConn.remoteDescription.type);
-                    if ('offer' === this.peerConn.remoteDescription.type) {
-                      this.peerConn.createAnswer()
-                      .then((answer) => {
-                        console.log('[answer] 執行 this.peerConn.setLocalDescription');
-                        return this.peerConn.setLocalDescription(answer);
-                      })
-                      .then(this.sendSdpToFirebase)
-                      .catch((e) => console.error('[錯誤] createAnswer error:', e));
-                    }
-                  })
-                  .catch((e) => console.error('setRemoteDescription error', e));
-                return;
-              }
-
-              // 接收對方的 candidate 並加入自己的 RTCPeerConnection
-              if (candidate) {
-                // console.log('收到 candicate:', roomMap);
-                this.peerConn.addIceCandidate(new RTCIceCandidate(candidate));
-                return;
-              }
-            });
+                if (this.userName === userName) {
+                  // console.log('是自己的資料, 所以 pass');
+                  return;
+                }
+  
+                if (sdp) {
+                  console.log('收到 sdp');
+                  // 將收到不是自己的 sdp 設定為自己的 remote
+                  this.peerConn.setRemoteDescription(new RTCSessionDescription(sdp))
+                    .then(() => {
+                      console.log('此時 this.peerConn.remoteDescription.type = ', this.peerConn.remoteDescription.type);
+                      if ('offer' === this.peerConn.remoteDescription.type) {
+                        this.peerConn.createAnswer()
+                        .then((answer) => {
+                          console.log('[answer] 執行 this.peerConn.setLocalDescription');
+                          return this.peerConn.setLocalDescription(answer);
+                        })
+                        .then(this.sendSdpToFirebase)
+                        .catch((e) => console.error('[錯誤] createAnswer error:', e));
+                      }
+                    })
+                    .catch((e) => console.error('setRemoteDescription error', e));
+                  return;
+                }
+  
+                // 接收對方的 candidate 並加入自己的 RTCPeerConnection
+                if (candidate) {
+                  setTimeout(() => {
+                    console.log('[setTimeout] 收到 candicate:', roomMap);
+                    this.peerConn.addIceCandidate(new RTCIceCandidate(candidate));
+                  }, 1000);
+                  return;
+                }
+              });
+          resolve(1);
+        });
       },
 
       clearFirebase() {
