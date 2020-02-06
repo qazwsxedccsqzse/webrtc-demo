@@ -1,6 +1,7 @@
 (() => {
 
   const REALTIME_DB_CONFIG = {
+    // 到時候請換成自己的 Realtime DB
     databaseURL: "https://instantmsg-847fc.firebaseio.com",
   };
   firebase.initializeApp(REALTIME_DB_CONFIG);
@@ -120,7 +121,11 @@
         };
 
         const error = function(error) {
-          console.error('getUserMediaError:', error);
+          Swal.fire({
+            title: `取得視訊失敗 ${error.message}`,
+            text: '取得視訊失敗',
+            icon: 'warning',
+          });
         };
 
         // 在 https 上只會取得一次權限
@@ -192,11 +197,9 @@
               console.log("Removed: " + evt.track.kind + ": " + evt.track.label);
             };
           }
-
-          // 同時清除 firebase 上的資訊
-          // this.realtimeDB.remove();
         };
 
+        // 監控 ice 狀態的改變
         this.peerConn.oniceconnectionstatechange = (evt) => {
           console.log('[ice] 連線狀態改變:', this.peerConn.iceConnectionState);
 
@@ -296,9 +299,7 @@
                 if (!roomMap) {
                   return;
                 }
-                // TODO: 處理 sdp 交換事宜
-                // console.log('Firebase 資料', roomMap);
-              
+                // 處理 sdp 交換事宜
                 // 會執行到這, 就代表 isCaller = false, 只能產生 answer
                 const {
                   userName,

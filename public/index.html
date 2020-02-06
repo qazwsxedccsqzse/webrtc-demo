@@ -72,7 +72,7 @@
 							@keyup.enter="invertIsUserNameSet"
 						>
 					</div>
-					<p v-else>用戶: {{ userName }}</p>
+					<p v-else>用戶: [{{ userName }}]</p>
 				</div>
 			</div>
 		</div>
@@ -87,8 +87,8 @@
 
 		<div class="width-100">
 			<div class="col-4 custom-btn btn-danger" @click="clearFirebase">清除Firebase</div>
-			<div class="col-4 custom-btn btn-warning" @click="screenshot">截圖存檔</div>
-			<div class="col-4 custom-btn btn-info">特效</div>
+			<div class="col-4 custom-btn btn-warning" @click="screenshot">截圖</div>
+			<div class="col-4 custom-btn btn-info"><a target="_blank" href="https://andrei.codes/ascii-camera/">特效</a></div>
 		</div>
 
 		<div>
